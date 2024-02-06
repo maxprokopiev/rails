@@ -390,6 +390,39 @@ class TrilogyAdapterTest < ActiveRecord::TrilogyTestCase
     end
   end
 
+  test "raises Deadlocked when a deadlock is encountered" do
+    with_warning_suppression do
+      connections = Concurrent::Set.new
+      assert_raises(ActiveRecord::Deadlocked) do
+        barrier = Concurrent::CyclicBarrier.new(2)
+
+        s1 = Sample.create value: 1
+        s2 = Sample.create value: 2
+
+        thread = Thread.new do
+          connections.add Sample.connection
+          Sample.transaction do
+            s1.lock!
+            barrier.wait
+            s2.update value: 1
+          end
+        end
+
+        begin
+          connections.add Sample.connection
+          Sample.transaction do
+            s2.lock!
+            barrier.wait
+            s1.update value: 2
+          end
+        ensure
+          thread.join
+        end
+      end
+      assert connections.all?(&:active?)
+    end
+  end
+
   # Create a temporary subscription to verify notification is sent.
   # Optionally verify the notification payload includes expected types.
   def assert_notification(notification, expected_payload = {}, &block)
@@ -427,4 +460,5 @@ class TrilogyAdapterTest < ActiveRecord::TrilogyTestCase
 
     assert_not notification_sent, "#{notification} notification was sent"
   end
+
 end
