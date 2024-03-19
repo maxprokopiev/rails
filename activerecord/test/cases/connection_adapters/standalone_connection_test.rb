@@ -18,6 +18,22 @@ module ActiveRecord
         assert_equal [[1]], result.rows
       end
 
+      def test_can_query_with_cache
+        @connection.cache do
+          event_fired = false
+          subscription = ->(name, start, finish, id, payload) {
+            event_fired = true
+
+            assert_includes payload, :sql
+            assert_equal "SELECT * FROM posts", payload[:sql]
+          }
+          ActiveSupport::Notifications.subscribed(subscription, "sql.active_record") do
+            @adapter.select_all "SELECT * FROM posts", "uncached query"
+          end
+          assert event_fired
+        end
+      end
+
       def test_async_fallback
         result = @connection.select_all("SELECT 1", async: true)
         assert_instance_of FutureResult::Complete, result
